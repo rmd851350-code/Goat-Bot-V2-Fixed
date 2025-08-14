@@ -6,7 +6,7 @@ module.exports = {
     name: "sexvid",
     aliases: ["sex","sexvid"],
     version: "2.0",
-    author: "nexo_here",
+    author: "THOMAS SHELBY",
     countDown: 30,
     role: 0,
     shortDescription: "",
