@@ -11,7 +11,7 @@ module.exports = {
  config: {
  name: "alldl",
  version: "1.0.5",
- author: "THOMAS SHELBY",
+ author: "Allah jane ke banaise",
  countDown: 2,
  role: 0,
  description: {
