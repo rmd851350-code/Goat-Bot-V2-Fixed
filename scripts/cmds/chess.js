@@ -1,137 +1,102 @@
-// Puppeteer + Smarter Chess Bot (Unofficial, cookies-based)
-const puppeteer = require("puppeteer");
-const fs = require("fs");
 const { Chess } = require("chess.js");
 
-const COOKIES_PATH = "./cookies.json"; // GitHub-এ আপলোড করা cookies.json
+const games = {}; // chatId -> Chess instance
 
-// Conversation-wise games
-const games = new Map(); // key: conversationId, value: Chess instance
+function renderBoard(chess) {
+  const board = chess.board();
+  let str = "";
+  for (let row of board) {
+    str += row
+      .map(square => {
+        if (square === null) return "·";
+        const piece = square.type;
+        return square.color === "w" ? piece.toUpperCase() : piece;
+      })
+      .join(" ") + "\n";
+  }
+  return "```\n" + str + "```";
+}
 
-// Basic piece values for evaluation
-const pieceValue = { p:1, n:3, b:3, r:5, q:9, k:0 };
-
-// Simple evaluation: material balance
+// Simple evaluation: material count
 function evaluateBoard(chess) {
-    let board = chess.board();
-    let score = 0;
-    for (let r=0; r<8; r++) {
-        for (let f=0; f<8; f++) {
-            const sq = board[r][f];
-            if (sq) {
-                let val = pieceValue[sq.type.toLowerCase()] || 0;
-                score += sq.color === 'w' ? val : -val;
-            }
-        }
+  const pieceValues = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+  let score = 0;
+  for (const row of chess.board()) {
+    for (const square of row) {
+      if (square) {
+        const val = pieceValues[square.type];
+        score += square.color === "w" ? val : -val;
+      }
     }
-    return score;
+  }
+  return score;
 }
 
-// Choose best move (1-ply lookahead)
-function chooseBestMove(chess) {
-    const moves = chess.moves({ verbose:true });
-    let bestScore = -Infinity;
-    let bestMove = null;
-    for (const move of moves) {
-        chess.move(move);
-        const score = -evaluateBoard(chess); // Negamax style
-        chess.undo();
-        if (score > bestScore) {
-            bestScore = score;
-            bestMove = move;
-        }
+// Pick best move by shallow evaluation
+function getBestMove(chess) {
+  const moves = chess.moves();
+  let bestMove = null;
+  let bestEval = -Infinity;
+
+  for (let move of moves) {
+    chess.move(move);
+    let evalScore = -evaluateBoard(chess);
+    chess.undo();
+    if (evalScore > bestEval) {
+      bestEval = evalScore;
+      bestMove = move;
     }
-    return bestMove;
+  }
+  return bestMove || moves[Math.floor(Math.random() * moves.length)];
 }
 
-(async () => {
-    const browser = await puppeteer.launch({
-        headless: true, // Render এ true
-        args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
-    const page = await browser.newPage();
+module.exports = {
+  name: "chess",
+  author: "THOMAS SHELBY",
+  description: "Play chess with the bot",
+  async execute(msg, args) {
+    const chatId = msg.threadID;
 
-    // Load cookies
-    const cookiesString = fs.readFileSync(COOKIES_PATH, "utf-8");
-    const cookies = JSON.parse(cookiesString);
-    await page.setCookie(...cookies);
-    await page.goto("https://www.messenger.com/");
-    console.log("✅ Logged in using cookies");
-
-    // Polling messages every 5 sec
-    while (true) {
-        try {
-            // Get all messages in view
-            const messages = await page.$$eval(
-                "div[aria-label='Messages'] div[role='row'] span",
-                els => els.map(e => ({text:e.innerText, id:e.parentElement.parentElement.dataset.threadid || 'unknown'}))
-            );
-
-            for (const msg of messages) {
-                const lower = msg.text.toLowerCase();
-                const convoId = msg.id; // use thread id as convo key
-
-                // Start new game
-                if (lower.startsWith("!chess")) {
-                    if (!games.has(convoId)) games.set(convoId, new Chess());
-                    await sendMessage(page, convoId, "♟ নতুন গেম শুরু!\n" + displayBoard(games.get(convoId)));
-                }
-
-                // Move: e2e4
-                if (/^[a-h][1-8][a-h][1-8]$/.test(lower)) {
-                    if (!games.has(convoId)) games.set(convoId, new Chess());
-                    const chess = games.get(convoId);
-                    const move = chess.move({ from: lower.slice(0,2), to: lower.slice(2,4) });
-                    if (!move) {
-                        await sendMessage(page, convoId, "অবৈধ চাল!");
-                        continue;
-                    }
-
-                    // Smarter bot move
-                    const botMove = chooseBestMove(chess);
-                    if (botMove) chess.move(botMove);
-
-                    await sendMessage(page, convoId,
-                        `আপনার চাল: ${move.from}${move.to}\n` +
-                        (botMove ? `আমার চাল: ${botMove.from}${botMove.to}\n` : "আমি আর move করতে পারি না!\n") +
-                        displayBoard(chess)
-                    );
-
-                    if (chess.game_over()) games.delete(convoId);
-                }
-            }
-
-            await new Promise(r => setTimeout(r, 5000));
-        } catch (err) {
-            console.error(err);
-        }
+    // Start new game
+    if (args.length === 0) {
+      games[chatId] = new Chess();
+      return msg.reply(
+        "♟️ New chess game started!\nYou are White. Send your move like `e2e4`.\n" +
+        renderBoard(games[chatId])
+      );
     }
-})();
 
-// Display chess board in Unicode
-function displayBoard(chess) {
-    const map = { 'p':'♟','r':'♜','n':'♞','b':'♝','q':'♛','k':'♚','P':'♙','R':'♖','N':'♘','B':'♗','Q':'♕','K':'♔' };
-    let rows = chess.board();
-    let lines = [];
-    for (let r=7; r>=0; r--) {
-        let line = `${r+1} `;
-        for (let f=0; f<8; f++) {
-            const sq = rows[r][f];
-            if (!sq) line += '· ';
-            else line += map[sq.type === sq.type.toLowerCase() ? sq.type : sq.type.toUpperCase()] + ' ';
-        }
-        lines.push(line.trim());
+    if (!games[chatId]) {
+      return msg.reply("No game in progress. Type `!chess` to start a new game.");
     }
-    lines.push('  a b c d e f g h');
-    return lines.join('\n');
-}
 
-// Send message (simplified)
-async function sendMessage(page, convoId, text) {
-    const textarea = await page.$("div[aria-label='Type a message...']");
-    if (textarea) {
-        await textarea.focus();
-        await page.keyboard.type(text);
-        await page.keyboard.press("Enter");
+    const move = args[0];
+    const game = games[chatId];
+
+    // Player move
+    const playerMove = game.move(move, { sloppy: true });
+    if (!playerMove) {
+      return msg.reply("❌ Invalid move. Use format like `e2e4`.");
     }
-}
+
+    if (game.game_over()) {
+      const result = game.in_checkmate() ? "✅ You win!" : "Draw!";
+      delete games[chatId];
+      return msg.reply(renderBoard(game) + "\n" + result);
+    }
+
+    // Bot move
+    const botMove = getBestMove(game);
+    game.move(botMove);
+
+    if (game.game_over()) {
+      const result = game.in_checkmate() ? "💀 Bot wins!" : "Draw!";
+      delete games[chatId];
+      return msg.reply(renderBoard(game) + `\nBot plays ${botMove}\n` + result);
+    }
+
+    return msg.reply(
+      renderBoard(game) + `\nBot plays ${botMove}`
+    );
+  }
+};
