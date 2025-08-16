@@ -1,9 +1,3 @@
-/*
-  Author: THOMAS SHELBY
-  File: scripts/cmds/chess.js
-  Description: Messenger-compatible chess command for GoatBot with AI move
-*/
-
 const files = ["a","b","c","d","e","f","g","h"];
 const gamesMap = {}; // threadID -> game state
 
